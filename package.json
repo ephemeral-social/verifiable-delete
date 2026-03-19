@@ -1,0 +1,28 @@
+{
+  "name": "@ephemeral-social/verifiable-delete",
+  "version": "0.0.1",
+  "description": "Verifiable data deletion for the internet commons. Crypto-shredding + W3C Verifiable Credential deletion receipts + Sigstore Rekor transparency log.",
+  "license": "MIT",
+  "author": "Ephemeral Social PBC <mansoor@ephemeralsocial.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ephemeral-social/verifiable-delete"
+  },
+  "keywords": [
+    "deletion",
+    "verifiable",
+    "crypto-shredding",
+    "privacy",
+    "gdpr",
+    "verifiable-credentials",
+    "w3c",
+    "encryption",
+    "sigstore",
+    "rekor",
+    "transparency-log"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
