@@ -1,0 +1,327 @@
+/**
+ * W3C Verifiable Credential deletion receipts.
+ *
+ * Generates machine-verifiable deletion receipts following
+ * W3C VC Data Model 2.0 with a custom deletion attestation vocabulary.
+ *
+ * @module receipts
+ */
+
+import { sha512 } from "@noble/hashes/sha2";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
+import * as ed from "@noble/ed25519";
+import { canonicalJSON, sha256hex } from "../utils.js";
+import { verifyThresholdDestruction, type DestructionAttestation } from "../threshold/index.js";
+import { hashScanResult, type ScanResult } from "../scan/index.js";
+import type { InclusionProof } from "../log/index.js";
+
+// Ed25519 sync setup for Node
+if (!ed.etc.sha512Sync) {
+  ed.etc.sha512Sync = (...m: Uint8Array[]) => sha512(ed.etc.concatBytes(...m));
+}
+
+// --- Types ---
+
+/** Non-membership proof from the Sparse Merkle Tree. */
+export interface NonMembershipProof {
+  /** The entity hash that was looked up. */
+  entityHash: string;
+  /** The SMT root hash at time of proof generation. */
+  smtRoot: string;
+  /** The proof siblings (base64 encoded). */
+  proof: string;
+  /** Whether the proof demonstrates non-membership. */
+  nonMember: boolean;
+}
+
+/** The complete deletion receipt as a W3C VC. */
+export interface DeletionReceipt {
+  /** W3C VC context. */
+  "@context": string[];
+  /** Credential types. */
+  type: string[];
+  /** Receipt ID (random UUID). */
+  id: string;
+  /** Issuer DID. */
+  issuer: string;
+  /** ISO 8601 issuance timestamp. */
+  issuanceDate: string;
+  /** The deletion claims. */
+  credentialSubject: {
+    entityType: string;
+    commitment: string;
+    salt: string;
+    deletionMethod: string;
+    encryptionAlgorithm: string;
+    keyManagement: string;
+    keyRatcheting: string;
+  };
+  /** Evidence supporting the deletion claims. */
+  evidence: Array<
+    | ThresholdAttestationEvidence
+    | StorageScanEvidence
+    | NonMembershipEvidence
+    | TransparencyLogEvidence
+  >;
+  /** Ed25519 proof over the entire credential. */
+  proof: {
+    type: string;
+    verificationMethod: string;
+    proofValue: string;
+  };
+}
+
+export interface ThresholdAttestationEvidence {
+  type: "ThresholdAttestation";
+  participants: number;
+  threshold: number;
+  attestations: DestructionAttestation[];
+}
+
+export interface StorageScanEvidence {
+  type: "StorageScan";
+  scanHash: string;
+  backendsChecked: number;
+  allAbsent: boolean;
+  keyVerified: boolean;
+}
+
+export interface NonMembershipEvidence {
+  type: "NonMembershipProof";
+  smtRoot: string;
+  proof: string;
+}
+
+export interface TransparencyLogEvidence {
+  type: "TransparencyLogInclusion";
+  logIndex: number;
+  treeSize: number;
+  treeRoot: string;
+  inclusionProof: string[];
+  witnessSignatures: Array<{ witness: string; signature: string }>;
+}
+
+// --- Functions ---
+
+/**
+ * Compute the commitment for a deletion event.
+ * commitment = SHA256("vd-commitment-v1:" + entityType + ":" + entityId + ":" + salt)
+ */
+export async function computeCommitment(
+  entityType: string,
+  entityId: string,
+  salt: string,
+): Promise<string> {
+  return sha256hex(
+    new TextEncoder().encode(`vd-commitment-v1:${entityType}:${entityId}:${salt}`),
+  );
+}
+
+/**
+ * Generate a deletion receipt with all evidence.
+ */
+export async function createDeletionReceipt(params: {
+  entityType: string;
+  entityId: string;
+  issuerDid: string;
+  signingKey: Uint8Array;
+  attestations: DestructionAttestation[];
+  scanResult: ScanResult;
+  nonMembershipProof: NonMembershipProof;
+  inclusionProof: InclusionProof;
+  witnessSignatures?: Array<{ witness: string; signature: string }>;
+}): Promise<DeletionReceipt> {
+  const {
+    entityType,
+    entityId,
+    issuerDid,
+    signingKey,
+    attestations,
+    scanResult,
+    nonMembershipProof,
+    inclusionProof,
+    witnessSignatures,
+  } = params;
+
+  // 1. Generate IDs
+  const receiptId = crypto.randomUUID();
+  const salt = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
+
+  // 2. Compute commitment
+  const commitment = await computeCommitment(entityType, entityId, salt);
+
+  // 3. Compute scan hash
+  const scanHash = await hashScanResult(scanResult);
+
+  // 4. Build evidence items
+  const thresholdEvidence: ThresholdAttestationEvidence = {
+    type: "ThresholdAttestation",
+    participants: 3,
+    threshold: 2,
+    attestations,
+  };
+
+  const storageScanEvidence: StorageScanEvidence = {
+    type: "StorageScan",
+    scanHash,
+    backendsChecked: scanResult.backends.length,
+    allAbsent: scanResult.backends.every((b) => b.absent),
+    keyVerified: scanResult.keyVerification.expectedFailure,
+  };
+
+  const nonMembershipEvidence: NonMembershipEvidence = {
+    type: "NonMembershipProof",
+    smtRoot: nonMembershipProof.smtRoot,
+    proof: nonMembershipProof.proof,
+  };
+
+  const transparencyLogEvidence: TransparencyLogEvidence = {
+    type: "TransparencyLogInclusion",
+    logIndex: inclusionProof.logIndex,
+    treeSize: inclusionProof.treeSize,
+    treeRoot: inclusionProof.rootHash,
+    inclusionProof: inclusionProof.hashes,
+    witnessSignatures: witnessSignatures ?? [],
+  };
+
+  // 5. Build credential WITHOUT proof field
+  const credentialWithoutProof = {
+    "@context": [
+      "https://www.w3.org/2018/credentials/v1",
+      "https://ephemeral.social/ns/deletion/v1",
+    ],
+    type: ["VerifiableCredential", "DeletionReceipt"],
+    id: `urn:uuid:${receiptId}`,
+    issuer: issuerDid,
+    issuanceDate: new Date().toISOString(),
+    credentialSubject: {
+      entityType,
+      commitment,
+      salt,
+      deletionMethod: "crypto_shredding",
+      encryptionAlgorithm: "AES-256-GCM",
+      keyManagement: "threshold_2_of_3",
+      keyRatcheting: "HKDF-SHA256",
+    },
+    evidence: [
+      thresholdEvidence,
+      storageScanEvidence,
+      nonMembershipEvidence,
+      transparencyLogEvidence,
+    ],
+  };
+
+  // 6. Sign
+  const message = new TextEncoder().encode(
+    "vd-receipt-v1:" + canonicalJSON(credentialWithoutProof),
+  );
+  const signature = bytesToHex(await ed.signAsync(message, signingKey));
+
+  // 7. Attach proof and return
+  return {
+    ...credentialWithoutProof,
+    proof: {
+      type: "Ed25519Signature2020",
+      verificationMethod: `${issuerDid}#key-1`,
+      proofValue: signature,
+    },
+  } satisfies DeletionReceipt;
+}
+
+/**
+ * Verify all components of a deletion receipt.
+ * Checks: operator signature, threshold attestation signatures,
+ * Merkle inclusion proof (structural), SMT non-membership proof (structural).
+ */
+export async function verifyDeletionReceipt(
+  receipt: DeletionReceipt,
+  issuerPublicKey: Uint8Array,
+): Promise<{
+  valid: boolean;
+  checks: {
+    operatorSignature: boolean;
+    thresholdAttestations: boolean;
+    inclusionProof: boolean;
+    nonMembershipProof: boolean;
+  };
+}> {
+  // 1. Operator signature (FULL crypto)
+  let operatorSignature = false;
+  try {
+    // Reconstruct the credential without proof
+    const { proof: _proof, ...credentialWithoutProof } = receipt;
+    const message = new TextEncoder().encode(
+      "vd-receipt-v1:" + canonicalJSON(credentialWithoutProof),
+    );
+    const sigBytes = hexToBytes(receipt.proof.proofValue);
+    operatorSignature = await ed.verifyAsync(sigBytes, message, issuerPublicKey);
+  } catch {
+    operatorSignature = false;
+  }
+
+  // 2. Threshold attestations (FULL crypto)
+  let thresholdAttestations = false;
+  try {
+    const thresholdEvidence = receipt.evidence.find(
+      (e): e is ThresholdAttestationEvidence => e.type === "ThresholdAttestation",
+    );
+    if (thresholdEvidence) {
+      thresholdAttestations = await verifyThresholdDestruction(
+        thresholdEvidence.attestations,
+        thresholdEvidence.threshold,
+      );
+    }
+  } catch {
+    thresholdAttestations = false;
+  }
+
+  // 3. Inclusion proof (STRUCTURAL check)
+  let inclusionProof = false;
+  try {
+    const logEvidence = receipt.evidence.find(
+      (e): e is TransparencyLogEvidence => e.type === "TransparencyLogInclusion",
+    );
+    if (logEvidence) {
+      inclusionProof =
+        typeof logEvidence.logIndex === "number" &&
+        logEvidence.logIndex >= 0 &&
+        typeof logEvidence.treeSize === "number" &&
+        logEvidence.treeSize > 0 &&
+        typeof logEvidence.treeRoot === "string" &&
+        logEvidence.treeRoot.length > 0 &&
+        Array.isArray(logEvidence.inclusionProof);
+    }
+  } catch {
+    inclusionProof = false;
+  }
+
+  // 4. Non-membership proof (STRUCTURAL check)
+  let nonMembershipProof = false;
+  try {
+    const nmEvidence = receipt.evidence.find(
+      (e): e is NonMembershipEvidence => e.type === "NonMembershipProof",
+    );
+    if (nmEvidence) {
+      nonMembershipProof =
+        typeof nmEvidence.smtRoot === "string" &&
+        nmEvidence.smtRoot.length > 0 &&
+        typeof nmEvidence.proof === "string" &&
+        nmEvidence.proof.length > 0;
+    }
+  } catch {
+    nonMembershipProof = false;
+  }
+
+  const valid =
+    operatorSignature && thresholdAttestations && inclusionProof && nonMembershipProof;
+
+  return {
+    valid,
+    checks: {
+      operatorSignature,
+      thresholdAttestations,
+      inclusionProof,
+      nonMembershipProof,
+    },
+  };
+}

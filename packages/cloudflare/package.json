@@ -1,0 +1,45 @@
+{
+  "name": "@ephemeral-social/verifiable-delete-cloudflare",
+  "version": "0.1.0",
+  "description": "Cloudflare Workers/Durable Objects adapter for Verifiable Delete.",
+  "license": "MIT",
+  "author": "Ephemeral Social PBC <mansoor@ephemeralsocial.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ephemeral-social/verifiable-delete",
+    "directory": "packages/cloudflare"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@ephemeral-social/verifiable-delete": "*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250410.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -7,6 +7,8 @@
  * @module scan
  */
 
+import { sha256hex, canonicalJSON } from "../utils.js";
+
 // --- Types ---
 
 /** Result of scanning a single storage backend. */
@@ -71,22 +73,76 @@ export interface StorageScanner {
  *
  * @param entityId - The entity that was deleted
  * @param scanners - Array of storage scanners (one per backend)
- * @param testCiphertext - A retained test ciphertext for key verification
- * @param kek - The (presumably destroyed) key to test against
+ * @param testCiphertextId - ID of the test ciphertext used for key verification
+ * @param keyVerified - Whether key destruction was verified
+ * @param keyError - Error message if key verification failed
  */
-export async function runDeletionScan(_params: {
+export async function runDeletionScan(params: {
   entityId: string;
   scanners: StorageScanner[];
   testCiphertextId: string;
   keyVerified: boolean;
   keyError?: string;
 }): Promise<ScanResult> {
-  throw new Error("Not implemented");
+  const { entityId, scanners, testCiphertextId, keyVerified, keyError } = params;
+
+  const scanId = crypto.randomUUID();
+  const timestamp = new Date().toISOString();
+
+  // Run all scanners in parallel, wrapping each in try/catch
+  const backends = await Promise.all(
+    scanners.map(async (scanner) => {
+      try {
+        return await scanner.checkAbsence(entityId);
+      } catch (err) {
+        return {
+          type: scanner.type,
+          identifier: "unknown",
+          query: "unknown",
+          absent: false,
+          scannedAt: new Date().toISOString(),
+          note: `Scanner error: ${err instanceof Error ? err.message : String(err)}`,
+        } satisfies BackendScanResult;
+      }
+    }),
+  );
+
+  // Build key verification result
+  const keyVerification: KeyVerificationResult = {
+    testCiphertextId,
+    expectedFailure: keyVerified,
+    ...(keyError !== undefined ? { error: keyError } : {}),
+  };
+
+  // allVerified: all backends absent (vacuously true if zero scanners) AND key verified
+  const allVerified =
+    (backends.length === 0 || backends.every((b) => b.absent)) && keyVerified;
+
+  // Build caveats from backend notes and key failure
+  const caveats: string[] = [];
+  for (const backend of backends) {
+    if (backend.note !== undefined) {
+      caveats.push(`${backend.type}: ${backend.note}`);
+    }
+  }
+  if (!keyVerified) {
+    caveats.push(`Key verification failed${keyError !== undefined ? `: ${keyError}` : ""}`);
+  }
+
+  return {
+    scanId,
+    timestamp,
+    entityId,
+    backends,
+    keyVerification,
+    allVerified,
+    caveats,
+  };
 }
 
 /**
  * Compute the SHA-256 hash of a scan result for inclusion in receipts.
  */
-export async function hashScanResult(_result: ScanResult): Promise<string> {
-  throw new Error("Not implemented");
+export async function hashScanResult(result: ScanResult): Promise<string> {
+  return sha256hex(new TextEncoder().encode(canonicalJSON(result)));
 }

@@ -1,84 +1,21 @@
 {
-  "name": "@ephemeral-social/verifiable-delete",
-  "version": "0.1.0",
-  "description": "Verifiable data deletion for the internet. Threshold crypto-shredding + W3C VC deletion receipts + public Merkle tree transparency log.",
-  "license": "MIT",
-  "author": "Ephemeral Social PBC <mansoor@ephemeralsocial.com>",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/ephemeral-social/verifiable-delete"
-  },
-  "keywords": [
-    "deletion",
-    "verifiable",
-    "crypto-shredding",
-    "privacy",
-    "gdpr",
-    "verifiable-credentials",
-    "w3c",
-    "encryption",
-    "threshold-cryptography",
-    "shamir",
-    "merkle-tree",
-    "transparency-log",
-    "right-to-erasure"
-  ],
-  "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    },
-    "./crypto": {
-      "import": "./dist/crypto/index.js",
-      "types": "./dist/crypto/index.d.ts"
-    },
-    "./threshold": {
-      "import": "./dist/threshold/index.js",
-      "types": "./dist/threshold/index.d.ts"
-    },
-    "./receipts": {
-      "import": "./dist/receipts/index.js",
-      "types": "./dist/receipts/index.d.ts"
-    },
-    "./log": {
-      "import": "./dist/log/index.js",
-      "types": "./dist/log/index.d.ts"
-    },
-    "./scan": {
-      "import": "./dist/scan/index.js",
-      "types": "./dist/scan/index.d.ts"
-    }
-  },
-  "files": [
-    "dist",
-    "LICENSE",
-    "README.md"
+  "name": "verifiable-delete",
+  "private": true,
+  "workspaces": [
+    "packages/*"
   ],
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "npm run build --workspaces",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src/",
-    "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist",
-    "prepublishOnly": "npm run clean && npm run build"
-  },
-  "dependencies": {
-    "@noble/hashes": "^1.7.0",
-    "@noble/ed25519": "^2.2.0",
-    "shamir-secret-sharing": "^2.1.0",
-    "@zk-kit/sparse-merkle-tree": "^2.1.0"
+    "test:core": "vitest run packages/core/",
+    "test:integration": "vitest run tests/",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces",
+    "clean": "npm run clean --workspaces"
   },
   "devDependencies": {
-    "tsup": "^8.4.0",
-    "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "eslint": "^9.0.0",
-    "@types/node": "^22.0.0"
+    "vitest": "^3.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
