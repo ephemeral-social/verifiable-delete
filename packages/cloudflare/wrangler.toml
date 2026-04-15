@@ -2,3 +2,35 @@ name = "verifiable-delete"
 main = "src/index.ts"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
+
+# --- Durable Objects ---
+[durable_objects]
+bindings = [
+  { name = "KEY_SHARE_DO", class_name = "KeyShareDO" },
+  { name = "TRANSPARENCY_LOG_DO", class_name = "TransparencyLogDO" },
+  { name = "SMT_DO", class_name = "SparseMerkleTreeDO" },
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["KeyShareDO", "TransparencyLogDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["SparseMerkleTreeDO"]
+
+# --- D1 ---
+[[d1_databases]]
+binding = "DB"
+database_name = "vd-demo"
+database_id = "5fe7eae0-3df3-45f4-8a6e-9892d37d9491"
+
+# --- KV ---
+[[kv_namespaces]]
+binding = "KV"
+id = "c99aaa67bf3f4876bf275ff68f7148b4"
+
+# --- R2 ---
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "vd-demo"

@@ -51,6 +51,10 @@
     "./scan": {
       "import": "./dist/scan/index.js",
       "types": "./dist/scan/index.d.ts"
+    },
+    "./smt": {
+      "import": "./dist/smt/index.js",
+      "types": "./dist/smt/index.d.ts"
     }
   },
   "files": [

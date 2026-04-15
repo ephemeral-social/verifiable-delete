@@ -10,33 +10,22 @@
     "directory": "packages/cloudflare"
   },
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
-  },
-  "files": [
-    "dist",
-    "LICENSE",
-    "README.md"
-  ],
+  "main": "src/index.ts",
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist",
-    "deploy": "wrangler deploy"
+    "init-db": "wrangler d1 execute vd-demo --file=schema.sql"
   },
   "dependencies": {
-    "@ephemeral-social/verifiable-delete": "*"
+    "@ephemeral-social/verifiable-delete": "*",
+    "@noble/ed25519": "^2.2.0",
+    "@noble/hashes": "^1.7.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250410.0",
-    "tsup": "^8.4.0",
     "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
     "wrangler": "^4.0.0"
   },
   "engines": {

@@ -8,6 +8,7 @@ export default defineConfig({
     "src/receipts/index.ts",
     "src/log/index.ts",
     "src/scan/index.ts",
+    "src/smt/index.ts",
   ],
   format: ["esm"],
   dts: true,

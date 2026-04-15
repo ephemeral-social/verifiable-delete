@@ -50,6 +50,7 @@ import {
   type DeletionReceipt,
   type NonMembershipProof,
 } from "../../packages/core/src/receipts/index.js";
+import { createSMT, entityToKey, serializeProof } from "../../packages/core/src/smt/index.js";
 import { canonicalJSON } from "../../packages/core/src/utils.js";
 
 // Ed25519 sync setup for Node
@@ -175,15 +176,11 @@ function mockScanner(absent: boolean): StorageScanner {
   };
 }
 
-function mockNonMembershipProof(entityId: string): NonMembershipProof {
-  return {
-    entityHash: bytesToHex(new TextEncoder().encode(entityId).slice(0, 32).length < 32
-      ? crypto.getRandomValues(new Uint8Array(32))
-      : new TextEncoder().encode(entityId).slice(0, 32)),
-    smtRoot: bytesToHex(crypto.getRandomValues(new Uint8Array(32))),
-    proof: btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(64)))),
-    nonMember: true,
-  };
+function realNonMembershipProof(entityId: string): NonMembershipProof {
+  const smt = createSMT();
+  smt.add(entityToKey("other-entity"), entityToKey("other-entity"));
+  const proof = smt.createProof(entityToKey(entityId));
+  return serializeProof(proof, entityId);
 }
 
 async function signLogEntry(
@@ -259,7 +256,7 @@ async function runFullPipeline(params: {
   const salt = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
   const commitment = await computeCommitment(entityType, entityId, salt);
   const scanHash = await hashScanResult(scanResult);
-  const nmProof = mockNonMembershipProof(entityId);
+  const nmProof = realNonMembershipProof(entityId);
 
   const entryWithoutSig: Omit<LogEntry, "index" | "operatorSignature"> = {
     receiptId: crypto.randomUUID(),
@@ -340,7 +337,7 @@ describe("integration: all 5 modules E2E", () => {
     const salt = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
     const commitment = await computeCommitment("event_data", "event-123", salt);
     const scanHash = await hashScanResult(scanResult);
-    const nmProof = mockNonMembershipProof("event-123");
+    const nmProof = realNonMembershipProof("event-123");
 
     const entryWithoutSig: Omit<LogEntry, "index" | "operatorSignature"> = {
       receiptId: crypto.randomUUID(),
@@ -668,7 +665,7 @@ describe("integration: all 5 modules E2E", () => {
       signingKey: infra.operatorSigningKey,
       attestations,
       scanResult,
-      nonMembershipProof: mockNonMembershipProof("mixed-scan"),
+      nonMembershipProof: realNonMembershipProof("mixed-scan"),
       inclusionProof: { logIndex: 0, treeSize: 1, rootHash: "abc", hashes: [] },
     });
 
@@ -879,7 +876,7 @@ describe("integration: all 5 modules E2E", () => {
       signingKey: infra.operatorSigningKey,
       attestations,
       scanResult,
-      nonMembershipProof: mockNonMembershipProof("three-attest"),
+      nonMembershipProof: realNonMembershipProof("three-attest"),
       inclusionProof: { logIndex: 0, treeSize: 1, rootHash: "abc", hashes: [] },
     });
 

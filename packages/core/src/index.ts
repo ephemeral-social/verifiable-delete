@@ -12,3 +12,5 @@ export * from "./threshold/index.js";
 export * from "./receipts/index.js";
 export * from "./log/index.js";
 export * from "./scan/index.js";
+export * from "./smt/index.js";
+export { canonicalJSON, sha256hex } from "./utils.js";

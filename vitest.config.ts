@@ -20,6 +20,7 @@ export default defineConfig({
         resolve: {
           alias: {
             "@ephemeral-social/verifiable-delete": resolve(__dirname, "packages/core/src/index.ts"),
+            "cloudflare:workers": resolve(__dirname, "packages/cloudflare/src/__mocks__/cloudflare-workers.ts"),
           },
         },
       },

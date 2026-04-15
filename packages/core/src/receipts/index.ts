@@ -14,6 +14,7 @@ import { canonicalJSON, sha256hex } from "../utils.js";
 import { verifyThresholdDestruction, type DestructionAttestation } from "../threshold/index.js";
 import { hashScanResult, type ScanResult } from "../scan/index.js";
 import type { InclusionProof } from "../log/index.js";
+import { verifyNonMembershipProof as verifySMTProof } from "../smt/index.js";
 
 // Ed25519 sync setup for Node
 if (!ed.etc.sha512Sync) {
@@ -21,6 +22,22 @@ if (!ed.etc.sha512Sync) {
 }
 
 // --- Types ---
+
+/** JSON-safe representation of a ShareHolder (publicKey as hex string). */
+export interface SerializedShareHolder {
+  id: string;
+  label: string;
+  publicKey: string; // hex
+}
+
+/** JSON-safe representation of a DestructionAttestation (binary fields as hex strings). */
+export interface SerializedDestructionAttestation {
+  kekId: string;
+  shareIndex: number;
+  holder: SerializedShareHolder;
+  destroyedAt: string;
+  signature: string; // hex
+}
 
 /** Non-membership proof from the Sparse Merkle Tree. */
 export interface NonMembershipProof {
@@ -75,7 +92,7 @@ export interface ThresholdAttestationEvidence {
   type: "ThresholdAttestation";
   participants: number;
   threshold: number;
-  attestations: DestructionAttestation[];
+  attestations: SerializedDestructionAttestation[];
 }
 
 export interface StorageScanEvidence {
@@ -88,8 +105,10 @@ export interface StorageScanEvidence {
 
 export interface NonMembershipEvidence {
   type: "NonMembershipProof";
+  entityHash: string;
   smtRoot: string;
   proof: string;
+  nonMember: boolean;
 }
 
 export interface TransparencyLogEvidence {
@@ -99,6 +118,38 @@ export interface TransparencyLogEvidence {
   treeRoot: string;
   inclusionProof: string[];
   witnessSignatures: Array<{ witness: string; signature: string }>;
+}
+
+// --- Serialization helpers ---
+
+/** Serialize a DestructionAttestation to JSON-safe format (Uint8Array → hex). */
+export function serializeAttestation(a: DestructionAttestation): SerializedDestructionAttestation {
+  return {
+    kekId: a.kekId,
+    shareIndex: a.shareIndex,
+    holder: {
+      id: a.holder.id,
+      label: a.holder.label,
+      publicKey: bytesToHex(a.holder.publicKey),
+    },
+    destroyedAt: a.destroyedAt,
+    signature: bytesToHex(a.signature),
+  };
+}
+
+/** Deserialize a SerializedDestructionAttestation back to DestructionAttestation (hex → Uint8Array). */
+export function deserializeAttestation(s: SerializedDestructionAttestation): DestructionAttestation {
+  return {
+    kekId: s.kekId,
+    shareIndex: s.shareIndex,
+    holder: {
+      id: s.holder.id,
+      label: s.holder.label,
+      publicKey: hexToBytes(s.holder.publicKey),
+    },
+    destroyedAt: s.destroyedAt,
+    signature: hexToBytes(s.signature),
+  };
 }
 
 // --- Functions ---
@@ -158,7 +209,7 @@ export async function createDeletionReceipt(params: {
     type: "ThresholdAttestation",
     participants: 3,
     threshold: 2,
-    attestations,
+    attestations: attestations.map(serializeAttestation),
   };
 
   const storageScanEvidence: StorageScanEvidence = {
@@ -171,8 +222,10 @@ export async function createDeletionReceipt(params: {
 
   const nonMembershipEvidence: NonMembershipEvidence = {
     type: "NonMembershipProof",
+    entityHash: nonMembershipProof.entityHash,
     smtRoot: nonMembershipProof.smtRoot,
     proof: nonMembershipProof.proof,
+    nonMember: nonMembershipProof.nonMember,
   };
 
   const transparencyLogEvidence: TransparencyLogEvidence = {
@@ -187,8 +240,8 @@ export async function createDeletionReceipt(params: {
   // 5. Build credential WITHOUT proof field
   const credentialWithoutProof = {
     "@context": [
-      "https://www.w3.org/2018/credentials/v1",
-      "https://ephemeral.social/ns/deletion/v1",
+      "https://www.w3.org/ns/credentials/v2",
+      "https://verifiabledelete.dev/ns/v1",
     ],
     type: ["VerifiableCredential", "DeletionReceipt"],
     id: `urn:uuid:${receiptId}`,
@@ -266,8 +319,9 @@ export async function verifyDeletionReceipt(
       (e): e is ThresholdAttestationEvidence => e.type === "ThresholdAttestation",
     );
     if (thresholdEvidence) {
+      const deserialized = thresholdEvidence.attestations.map(deserializeAttestation);
       thresholdAttestations = await verifyThresholdDestruction(
-        thresholdEvidence.attestations,
+        deserialized,
         thresholdEvidence.threshold,
       );
     }
@@ -295,18 +349,19 @@ export async function verifyDeletionReceipt(
     inclusionProof = false;
   }
 
-  // 4. Non-membership proof (STRUCTURAL check)
+  // 4. Non-membership proof (CRYPTOGRAPHIC verification)
   let nonMembershipProof = false;
   try {
     const nmEvidence = receipt.evidence.find(
       (e): e is NonMembershipEvidence => e.type === "NonMembershipProof",
     );
     if (nmEvidence) {
-      nonMembershipProof =
-        typeof nmEvidence.smtRoot === "string" &&
-        nmEvidence.smtRoot.length > 0 &&
-        typeof nmEvidence.proof === "string" &&
-        nmEvidence.proof.length > 0;
+      nonMembershipProof = verifySMTProof({
+        entityHash: nmEvidence.entityHash,
+        smtRoot: nmEvidence.smtRoot,
+        proof: nmEvidence.proof,
+        nonMember: nmEvidence.nonMember,
+      });
     }
   } catch {
     nonMembershipProof = false;

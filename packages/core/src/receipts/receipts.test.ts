@@ -13,6 +13,7 @@ import {
   createDestructionAttestation,
   type ShareHolder,
 } from "../threshold/index.js";
+import { createSMT, entityToKey, serializeProof } from "../smt/index.js";
 import type { ScanResult } from "../scan/index.js";
 import type { InclusionProof } from "../log/index.js";
 
@@ -55,13 +56,12 @@ function mockScanResult(entityId: string): ScanResult {
   };
 }
 
-function mockNonMembershipProof(): NonMembershipProof {
-  return {
-    entityHash: bytesToHex(crypto.getRandomValues(new Uint8Array(32))),
-    smtRoot: bytesToHex(crypto.getRandomValues(new Uint8Array(32))),
-    proof: btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(64)))),
-    nonMember: true,
-  };
+function realNonMembershipProof(entityId: string): NonMembershipProof {
+  const smt = createSMT();
+  smt.add(entityToKey("other-entity"), entityToKey("other-entity"));
+  const key = entityToKey(entityId);
+  const proof = smt.createProof(key);
+  return serializeProof(proof, entityId);
 }
 
 function mockInclusionProof(): InclusionProof {
@@ -95,11 +95,11 @@ async function createTestReceipt(): Promise<{
   const receipt = await createDeletionReceipt({
     entityType: "event_data",
     entityId: "entity-test",
-    issuerDid: "did:web:ephemeral.social",
+    issuerDid: "did:web:verifiabledelete.dev",
     signingKey,
     attestations: [a1, a2],
     scanResult: mockScanResult("entity-test"),
-    nonMembershipProof: mockNonMembershipProof(),
+    nonMembershipProof: realNonMembershipProof("entity-test"),
     inclusionProof: mockInclusionProof(),
   });
 
@@ -112,12 +112,12 @@ describe("receipts", () => {
     const { receipt } = await createTestReceipt();
 
     expect(receipt["@context"]).toEqual([
-      "https://www.w3.org/2018/credentials/v1",
-      "https://ephemeral.social/ns/deletion/v1",
+      "https://www.w3.org/ns/credentials/v2",
+      "https://verifiabledelete.dev/ns/v1",
     ]);
     expect(receipt.type).toEqual(["VerifiableCredential", "DeletionReceipt"]);
     expect(receipt.id).toMatch(/^urn:uuid:/);
-    expect(receipt.issuer).toBe("did:web:ephemeral.social");
+    expect(receipt.issuer).toBe("did:web:verifiabledelete.dev");
     expect(new Date(receipt.issuanceDate).getTime()).not.toBeNaN();
     expect(receipt.credentialSubject.entityType).toBe("event_data");
     expect(receipt.credentialSubject.deletionMethod).toBe("crypto_shredding");
@@ -189,8 +189,8 @@ describe("receipts", () => {
     const tampered = structuredClone(receipt) as DeletionReceipt;
     const thresholdEv = tampered.evidence.find((e) => e.type === "ThresholdAttestation");
     if (thresholdEv && "attestations" in thresholdEv && thresholdEv.attestations[0]) {
-      // Tamper with the signature
-      thresholdEv.attestations[0].signature = crypto.getRandomValues(new Uint8Array(64));
+      // Tamper with the signature (now a hex string)
+      thresholdEv.attestations[0].signature = bytesToHex(crypto.getRandomValues(new Uint8Array(64)));
     }
 
     const result = await verifyDeletionReceipt(tampered, publicKey);
@@ -258,11 +258,11 @@ describe("receipts", () => {
     const receipt = await createDeletionReceipt({
       entityType: "event_data",
       entityId: "no-witness",
-      issuerDid: "did:web:ephemeral.social",
+      issuerDid: "did:web:verifiabledelete.dev",
       signingKey,
       attestations: [a1, a2],
       scanResult: mockScanResult("no-witness"),
-      nonMembershipProof: mockNonMembershipProof(),
+      nonMembershipProof: realNonMembershipProof("no-witness"),
       inclusionProof: mockInclusionProof(),
       // No witnessSignatures
     });
@@ -291,11 +291,11 @@ describe("receipts", () => {
     const commonParams = {
       entityType: "event_data",
       entityId: "same-entity",
-      issuerDid: "did:web:ephemeral.social",
+      issuerDid: "did:web:verifiabledelete.dev",
       signingKey,
       attestations: [a1, a2],
       scanResult: mockScanResult("same-entity"),
-      nonMembershipProof: mockNonMembershipProof(),
+      nonMembershipProof: realNonMembershipProof("same-entity"),
       inclusionProof: mockInclusionProof(),
     };
 
@@ -343,16 +343,33 @@ describe("receipts", () => {
     const receipt = await createDeletionReceipt({
       entityType: "event_data",
       entityId: "three-attest",
-      issuerDid: "did:web:ephemeral.social",
+      issuerDid: "did:web:verifiabledelete.dev",
       signingKey,
       attestations: [a1, a2, a3],
       scanResult: mockScanResult("three-attest"),
-      nonMembershipProof: mockNonMembershipProof(),
+      nonMembershipProof: realNonMembershipProof("three-attest"),
       inclusionProof: mockInclusionProof(),
     });
 
     const result = await verifyDeletionReceipt(receipt, publicKey);
     expect(result.valid).toBe(true);
     expect(result.checks.thresholdAttestations).toBe(true);
+  });
+
+  // Test 15: JSON round-trip preserves receipt validity (cross-verification)
+  it("receipt survives JSON.stringify → JSON.parse round-trip", async () => {
+    const { receipt, publicKey } = await createTestReceipt();
+
+    // Serialize to JSON and back (simulates network transport / storage)
+    const json = JSON.stringify(receipt);
+    const parsed = JSON.parse(json) as DeletionReceipt;
+
+    // Verify the parsed receipt passes all checks
+    const result = await verifyDeletionReceipt(parsed, publicKey);
+    expect(result.valid).toBe(true);
+    expect(result.checks.operatorSignature).toBe(true);
+    expect(result.checks.thresholdAttestations).toBe(true);
+    expect(result.checks.inclusionProof).toBe(true);
+    expect(result.checks.nonMembershipProof).toBe(true);
   });
 });
