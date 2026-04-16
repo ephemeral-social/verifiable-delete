@@ -334,7 +334,7 @@ describe("demo orchestrator", () => {
     expect(step9Complete).toBeDefined();
     const data = step9Complete!.data as { data: { credentialType: string[]; evidenceCount: number } };
     expect(data.data.credentialType).toContain("DeletionReceipt");
-    expect(data.data.evidenceCount).toBe(4);
+    expect(data.data.evidenceCount).toBe(5);
   });
 
   it("done event contains receipt + operatorPublicKey", async () => {

@@ -48,6 +48,13 @@ export class TransparencyLogDO extends DurableObject<Env> {
   }
 
   private async getOrCreateSigningKey(): Promise<Uint8Array> {
+    // Prefer the operator signing key from env (ensures tree heads are verifiable
+    // with the same well-known public key as receipts and log entries)
+    if (this.env.OPERATOR_SIGNING_KEY) {
+      return hexToBytes(this.env.OPERATOR_SIGNING_KEY);
+    }
+
+    // Fallback: generate and persist a per-DO key (legacy / unconfigured)
     const sql = this.getAdapter()["sql"];
     sql.exec("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)");
     const existing = sql.exec<{ value: string }>(

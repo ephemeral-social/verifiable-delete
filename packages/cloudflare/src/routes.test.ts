@@ -252,12 +252,16 @@ describe("worker routes", () => {
     const res = await worker.fetch(makeRequest("/.well-known/vd-operator-key"), env);
     expect(res.status).toBe(200);
     const data = (await res.json()) as {
-      publicKey: string;
-      algorithm: string;
+      keys: Array<{ id: string; publicKey: string; algorithm: string; activeFrom: string; activeTo: string | null }>;
       verificationMethod: string;
     };
-    expect(data.publicKey).toBe(expectedPublicKey);
-    expect(data.algorithm).toBe("Ed25519");
+    expect(data.keys).toHaveLength(1);
+    const key = data.keys[0]!;
+    expect(key.publicKey).toBe(expectedPublicKey);
+    expect(key.algorithm).toBe("Ed25519");
+    expect(key.id).toBe("operator-key-1");
+    expect(key.activeFrom).toBe("2020-01-01T00:00:00.000Z");
+    expect(key.activeTo).toBeNull();
     expect(data.verificationMethod).toBe("did:web:verifiabledelete.dev#key-1");
   });
 
@@ -267,5 +271,17 @@ describe("worker routes", () => {
     expect(res.status).toBe(404);
     const data = (await res.json()) as { error: string };
     expect(data.error).toBe("Not found");
+  });
+
+  it("/v1/ without auth returns 401", async () => {
+    const env = createMockEnv();
+    const res = await worker.fetch(makeRequest("/v1/entities", "POST", { entityId: "x", entityType: "x" }), env);
+    expect(res.status).toBe(401);
+  });
+
+  it("/admin/ without VD_ADMIN_SECRET returns 401", async () => {
+    const env = createMockEnv();
+    const res = await worker.fetch(makeRequest("/admin/customers"), env);
+    expect(res.status).toBe(401);
   });
 });

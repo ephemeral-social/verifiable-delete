@@ -11,6 +11,8 @@
  * - GET  /log/consistency → Consistency proof
  * - GET  /.well-known/vd-operator-key → Operator public key
  * - POST /init          → Initialize D1 schema
+ * - /admin/*            → Admin endpoints (requires VD_ADMIN_SECRET)
+ * - /v1/*               → Authenticated API (requires API key)
  *
  * @packageDocumentation
  */
@@ -21,6 +23,14 @@ import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 import type { Env } from "./env.js";
 import { runDemoDeletion } from "./demo/orchestrator.js";
 import { getUIHtml } from "./ui/html.js";
+import { handleAdminRoute } from "./api/admin.js";
+import { authenticateRequest } from "./api/auth.js";
+import { handleEntitiesRoute } from "./api/entities.js";
+import { handleAgentsRoute } from "./api/agents.js";
+import { handleKeysRoute } from "./api/keys.js";
+import { handleUsageRoute } from "./api/usage.js";
+import { handleDeletionsRoute } from "./api/deletions.js";
+import { errorResponse } from "./api/errors.js";
 
 // Ed25519 sync setup
 if (!ed.etc.sha512Sync) {
@@ -33,8 +43,8 @@ export { SparseMerkleTreeDO } from "./durable-objects/sparse-merkle-tree.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
 function json(data: unknown, status = 200): Response {
@@ -132,18 +142,26 @@ export default {
       }
     }
 
-    // --- Schema init ---
+    // --- Schema init (updated to include all tables) ---
     if (path === "/init" && request.method === "POST") {
       try {
+        // D1 exec handles multiple semicolon-separated statements
         await env.DB.exec(
-          `CREATE TABLE IF NOT EXISTS demo_data (
-            entity_id TEXT PRIMARY KEY,
-            encrypted_blob TEXT NOT NULL,
-            nonce TEXT NOT NULL,
-            wrapped_dek TEXT NOT NULL,
-            kek_id TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
-          )`
+          "CREATE TABLE IF NOT EXISTS demo_data (entity_id TEXT PRIMARY KEY, encrypted_blob TEXT NOT NULL, nonce TEXT NOT NULL, wrapped_dek TEXT NOT NULL, kek_id TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')));"
+          + "CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL, plan TEXT NOT NULL DEFAULT 'standard', status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL);"
+          + "CREATE TABLE IF NOT EXISTS api_keys (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, key_hash TEXT NOT NULL, key_prefix TEXT NOT NULL, label TEXT, created_at TEXT NOT NULL, revoked_at TEXT);"
+          + "CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);"
+          + "CREATE INDEX IF NOT EXISTS idx_api_keys_customer ON api_keys(customer_id);"
+          + "CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, callback_url TEXT NOT NULL, public_key_hex TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', registered_at TEXT NOT NULL);"
+          + "CREATE INDEX IF NOT EXISTS idx_agents_customer ON agents(customer_id);"
+          + "CREATE TABLE IF NOT EXISTS key_registrations (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, kek_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL, destroyed_at TEXT);"
+          + "CREATE INDEX IF NOT EXISTS idx_key_registrations_customer ON key_registrations(customer_id);"
+          + "CREATE INDEX IF NOT EXISTS idx_key_registrations_kek ON key_registrations(kek_id);"
+          + "CREATE TABLE IF NOT EXISTS deletions (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, entity_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_hash TEXT NOT NULL, kek_id TEXT, status TEXT NOT NULL DEFAULT 'pending', receipt_id TEXT, receipt_json TEXT, scan_result_json TEXT, error TEXT, created_at TEXT NOT NULL, completed_at TEXT);"
+          + "CREATE INDEX IF NOT EXISTS idx_deletions_customer ON deletions(customer_id);"
+          + "CREATE INDEX IF NOT EXISTS idx_deletions_entity ON deletions(customer_id, entity_hash);"
+          + "CREATE INDEX IF NOT EXISTS idx_deletions_receipt ON deletions(receipt_id);"
+          + "CREATE TABLE IF NOT EXISTS usage (customer_id TEXT NOT NULL, month TEXT NOT NULL, entities_registered INTEGER NOT NULL DEFAULT 0, deletions_completed INTEGER NOT NULL DEFAULT 0, api_calls INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (customer_id, month));"
         );
         return json({ success: true });
       } catch (err) {
@@ -160,10 +178,54 @@ export default {
         await ed.getPublicKeyAsync(hexToBytes(env.OPERATOR_SIGNING_KEY)),
       );
       return json({
-        publicKey,
-        algorithm: "Ed25519",
+        keys: [
+          {
+            id: "operator-key-1",
+            publicKey,
+            algorithm: "Ed25519",
+            activeFrom: "2020-01-01T00:00:00.000Z",
+            activeTo: null,
+          },
+        ],
         verificationMethod: "did:web:verifiabledelete.dev#key-1",
       });
+    }
+
+    // --- Admin API ---
+    if (path.startsWith("/admin/")) {
+      return handleAdminRoute(request, env, path);
+    }
+
+    // --- Public receipt endpoints (no auth required) ---
+    if (path.match(/^\/v1\/receipts\/[^/]+(\/verify)?$/)) {
+      return handleDeletionsRoute(request, env, path, null);
+    }
+
+    // --- Authenticated V1 API ---
+    if (path.startsWith("/v1/")) {
+      const auth = await authenticateRequest(request, env);
+      if (!auth) {
+        return errorResponse(401, "UNAUTHORIZED", "Invalid or missing API key");
+      }
+
+      // Route to appropriate handler
+      if (path.startsWith("/v1/entities")) {
+        return handleEntitiesRoute(request, env, path, auth);
+      }
+      if (path.startsWith("/v1/agents")) {
+        return handleAgentsRoute(request, env, path, auth);
+      }
+      if (path.startsWith("/v1/keys")) {
+        return handleKeysRoute(request, env, path, auth);
+      }
+      if (path.startsWith("/v1/usage")) {
+        return handleUsageRoute(request, env, path, auth);
+      }
+      if (path.startsWith("/v1/deletions")) {
+        return handleDeletionsRoute(request, env, path, auth);
+      }
+
+      return errorResponse(404, "NOT_FOUND", "API route not found");
     }
 
     // --- 404 ---

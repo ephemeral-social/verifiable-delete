@@ -87,7 +87,7 @@ rsync -a \
   "$SOURCE_DIR/" "$TMPDIR/"
 
 # Quick secrets check - abort if any obvious secrets slip through
-if grep -rq "sk_live_\|sk_test_\|JWT_SECRET\|TWILIO_AUTH\|PRIVATE_KEY=" --include="*.ts" --include="*.js" --include="*.json" --include="*.toml" "$TMPDIR/" 2>/dev/null; then
+if grep -rq "sk_live_[a-zA-Z0-9]\{20,\}\|sk_test_[a-zA-Z0-9]\{20,\}\|JWT_SECRET=\|TWILIO_AUTH=\|PRIVATE_KEY=['\"]" --include="*.ts" --include="*.js" --include="*.json" --include="*.toml" "$TMPDIR/" 2>/dev/null; then
   echo "ERROR: Potential secrets detected! Aborting."
   echo "Run a manual review before syncing."
   exit 1

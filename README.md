@@ -4,7 +4,7 @@
 
 An open-source TypeScript framework that combines threshold crypto-shredding, W3C Verifiable Credential deletion receipts, a public append-only Merkle tree transparency log, and automated post-deletion scanning. Every deletion is attested by independent parties, logged in a tamper-evident public ledger, and verified through cryptographic proofs of data absence.
 
-> **Status: implementation in progress.** The architecture is complete. The reference integration is [Ephemeral Events](https://github.com/ephemeral-social/events) (live at [ephemeralsocial.com/events](https://ephemeralsocial.com/events)).
+> **Status: core library and Cloudflare adapter complete.** 122 unit tests, 78 production E2E assertions across 5 database backends. Deployed and verified on Cloudflare Workers. The reference integration is [Ephemeral Events](https://github.com/ephemeral-social/events) (live at [ephemeralsocial.com/events](https://ephemeralsocial.com/events)).
 
 ## The problem
 
@@ -114,13 +114,13 @@ Click any entry to view the full deletion receipt.
 ## Deliverables
 
 ### `@ephemeral-social/verifiable-delete` (MIT)
-Platform-agnostic core library. Envelope encryption (AES-256-GCM, DEK/KEK), Shamir threshold key management, forward-secret key ratcheting (HKDF), W3C VC deletion receipts, Sparse Merkle Tree proofs, Merkle tree transparency log. Works in any JavaScript runtime with Web Crypto API.
+Platform-agnostic core library. Envelope encryption (AES-256-GCM, DEK/KEK), Shamir threshold key management, forward-secret key ratcheting (HKDF), W3C VC deletion receipts, Sparse Merkle Tree proofs, Merkle tree transparency log. Works in any JavaScript runtime with Web Crypto API. Published on npm. 122 unit tests.
 
 ### `@ephemeral-social/verifiable-delete-cloudflare` (MIT)
-Reference edge adapter. Durable Objects key store and transparency log, Workers orchestration, post-deletion scanning across KV, R2, and D1.
+Cloudflare Workers edge adapter. Full API with customer management, API key authentication, entity registration, deletion orchestration, and receipt verification. Durable Objects for key share storage (with destruction attestation), Sparse Merkle Tree state, and append-only transparency log. D1 for relational data. Deployed and production-tested.
 
-### Verification Oracle API
-Public API for browsing the transparency log and verifying deletion receipts. Independent verification service for enterprise customers.
+### [`@ephemeral-social/verifiable-delete-scanner-agent`](https://github.com/ephemeral-social/verifiable-delete-scanner-agent) (MIT)
+Independent scanner agent that verifies data absence across storage backends after deletion. Supports PostgreSQL, MySQL/MariaDB, MSSQL, MongoDB, Redis, Elasticsearch, S3-compatible stores, and Cloudflare D1/KV/R2. Cryptographically signs scan results with Ed25519. Deployed as a standalone service that the VD operator calls during the deletion pipeline.
 
 ### Reference integration
 Integrated into [Ephemeral Events](https://github.com/ephemeral-social/events). Every deleted event page serves its deletion receipt with links to the public log. Live at [ephemeralsocial.com/events](https://ephemeralsocial.com/events).
@@ -130,19 +130,30 @@ Integrated into [Ephemeral Events](https://github.com/ephemeral-social/events). 
 ### Public (no authentication)
 
 ```
-GET  /log                                    Current signed tree head
+GET  /.well-known/vd-operator-key            Operator public key (keys array format)
+GET  /log                                    Current signed tree head (signed, Ed25519)
 GET  /log/entries?offset=0&limit=50          Paginated log entries
-GET  /log/entry/{receipt-id}                 Full deletion receipt with all proofs
-GET  /log/proof/{receipt-id}                 Merkle inclusion proof
-GET  /log/consistency?from={size}&to={size}  Consistency proof (append-only verification)
+GET  /log/proof/{index}                      Merkle inclusion proof
+GET  /v1/receipts/{id}/verify                Independent receipt verification
 ```
 
-### Authenticated (paid)
+### Customer API (API key authentication)
 
 ```
-POST /delete                                 Trigger deletion, returns receipt
-POST /verify                                 Submit receipt for independent verification
-GET  /log/entries?api_key=...                Customer-filtered log view
+POST /v1/entities                            Register entity in Sparse Merkle Tree
+POST /v1/keys                                Register threshold key shares (2-of-3 Shamir)
+POST /v1/agents                              Register scanner agent (callback URL + Ed25519 public key)
+GET  /v1/agents                              List registered agents
+POST /v1/deletions                           Trigger full deletion pipeline, returns W3C VC receipt
+POST /v1/deletions/batch                     Batch deletion (multiple entities)
+```
+
+### Admin API
+
+```
+POST /admin/customers                        Create customer account
+POST /admin/customers/{id}/keys              Issue API key
+GET  /admin/customers/{id}/usage             Usage statistics
 ```
 
 ## Prior art
@@ -179,22 +190,26 @@ This project provides: software-only, no blockchain, multi-party threshold attes
 
 ## Status
 
-| Component | Status |
-|-----------|--------|
-| Architecture design | Complete |
-| Core: envelope encryption (AES-256-GCM, DEK/KEK) | In progress |
-| Core: Shamir threshold key management | Planned |
-| Core: forward-secret key ratcheting (HKDF) | Planned |
-| Deletion receipt W3C VC schema | Planned |
-| Sparse Merkle Tree non-membership proofs | Planned |
-| Merkle tree transparency log | Planned |
-| Post-deletion scanning | Planned |
-| Cloudflare adapter (Durable Objects, KV, R2, D1) | Planned |
-| Verification Oracle API | Planned |
-| Reference integration (Ephemeral Events) | Planned |
+| Component | Status | Tests |
+|-----------|--------|-------|
+| Architecture design | Complete | — |
+| Core: envelope encryption (AES-256-GCM, DEK/KEK) | Complete | 28 unit |
+| Core: Shamir threshold key management | Complete | 21 unit |
+| Core: forward-secret key ratcheting (HKDF) | Complete | (included in crypto) |
+| Core: W3C VC deletion receipts | Complete | 17 unit |
+| Core: Sparse Merkle Tree non-membership proofs | Complete | 15 unit |
+| Core: Merkle tree transparency log | Complete | 21 unit |
+| Core: post-deletion scanning | Complete | 20 unit |
+| Cloudflare adapter: API routes & auth | Complete | 40+ unit |
+| Cloudflare adapter: Durable Objects (KeyShare, SMT, Log) | Complete | integration |
+| Cloudflare adapter: deletion orchestration | Complete | 78 E2E |
+| Scanner agent (7 backend types + 3 Cloudflare) | Complete | 78 E2E |
+| Production deployment (Cloudflare Workers) | Complete | verified |
+| Reference integration (Ephemeral Events) | In progress | — |
 
 ## Related
 
+- [Scanner Agent](https://github.com/ephemeral-social/verifiable-delete-scanner-agent) — Independent deletion verification agent (10 backend types)
 - [Ephemeral Events](https://github.com/ephemeral-social/events) — Production app with deletion-by-default architecture
 - [ephemeralsocial.com](https://ephemeralsocial.com) — Project website
 

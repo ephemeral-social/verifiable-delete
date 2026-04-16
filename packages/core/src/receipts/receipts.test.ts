@@ -125,7 +125,7 @@ describe("receipts", () => {
     expect(receipt.credentialSubject.keyManagement).toBe("threshold_2_of_3");
     expect(receipt.credentialSubject.keyRatcheting).toBe("HKDF-SHA256");
     expect(receipt.proof.type).toBe("Ed25519Signature2020");
-    expect(receipt.evidence).toHaveLength(4);
+    expect(receipt.evidence).toHaveLength(5);
   });
 
   // Test 2: commitment matches computeCommitment
@@ -356,7 +356,64 @@ describe("receipts", () => {
     expect(result.checks.thresholdAttestations).toBe(true);
   });
 
-  // Test 15: JSON round-trip preserves receipt validity (cross-verification)
+  // Test 15: receipt with attestations includes BackupCoverageEvidence
+  it("receipt with attestations includes BackupCoverageEvidence", async () => {
+    const { receipt } = await createTestReceipt();
+
+    const types = receipt.evidence.map((e) => e.type);
+    expect(types).toContain("BackupCoverage");
+
+    const backupCoverage = receipt.evidence.find((e) => e.type === "BackupCoverage");
+    expect(backupCoverage).toBeDefined();
+    expect(backupCoverage).toMatchObject({
+      type: "BackupCoverage",
+      method: "encryption_renders_backup_unreadable",
+      keyManagement: "threshold_2_of_3",
+    });
+    expect((backupCoverage as { note: string }).note).toContain("backups contain only ciphertext");
+  });
+
+  // Test 16: storageScanNote passed through to StorageScanEvidence
+  it("storageScanNote appears on StorageScanEvidence", async () => {
+    const signingKey = crypto.getRandomValues(new Uint8Array(32));
+
+    const [h1, h2] = await Promise.all([
+      createTestHolder("operator"),
+      createTestHolder("oracle"),
+    ]);
+    const kekId = crypto.randomUUID();
+    const [a1, a2] = await Promise.all([
+      createDestructionAttestation(kekId, 1, h1.holder, h1.privateKey),
+      createDestructionAttestation(kekId, 2, h2.holder, h2.privateKey),
+    ]);
+
+    const receipt = await createDeletionReceipt({
+      entityType: "event_data",
+      entityId: "note-entity",
+      issuerDid: "did:web:verifiabledelete.dev",
+      signingKey,
+      attestations: [a1, a2],
+      scanResult: mockScanResult("note-entity"),
+      nonMembershipProof: realNonMembershipProof("note-entity"),
+      inclusionProof: mockInclusionProof(),
+      storageScanNote: "No agent — key destruction only",
+    });
+
+    const storageScan = receipt.evidence.find((e) => e.type === "StorageScan");
+    expect(storageScan).toBeDefined();
+    expect((storageScan as { note: string }).note).toBe("No agent — key destruction only");
+  });
+
+  // Test 17: receipt without storageScanNote has no note on StorageScan
+  it("receipt without storageScanNote has no note on StorageScanEvidence", async () => {
+    const { receipt } = await createTestReceipt();
+
+    const storageScan = receipt.evidence.find((e) => e.type === "StorageScan");
+    expect(storageScan).toBeDefined();
+    expect("note" in storageScan! ? storageScan.note : undefined).toBeUndefined();
+  });
+
+  // Test 18: JSON round-trip preserves receipt validity (cross-verification)
   it("receipt survives JSON.stringify → JSON.parse round-trip", async () => {
     const { receipt, publicKey } = await createTestReceipt();
 

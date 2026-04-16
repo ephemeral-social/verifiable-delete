@@ -69,6 +69,18 @@ export class SparseMerkleTreeDO extends DurableObject<Env> {
     return serializeProof(proof, entityId);
   }
 
+  async hasEntity(entityId: string): Promise<boolean> {
+    const smt = this.ensureTree();
+    const key = entityToKey(entityId);
+    try {
+      const proof = smt.createProof(key);
+      // If the proof shows membership (not non-member), entity exists
+      return proof.membership;
+    } catch {
+      return false;
+    }
+  }
+
   async getRoot(): Promise<string> {
     const smt = this.ensureTree();
     return smt.root as string;

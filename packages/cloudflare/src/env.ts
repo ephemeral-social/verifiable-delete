@@ -18,4 +18,5 @@ export interface Env {
   KV: KVNamespace;
   BUCKET: R2Bucket;
   OPERATOR_SIGNING_KEY?: string; // hex-encoded Ed25519 private key (32 bytes → 64 hex chars)
+  VD_ADMIN_SECRET?: string; // bearer token for /admin/* endpoints
 }

@@ -79,6 +79,7 @@ export interface DeletionReceipt {
     | StorageScanEvidence
     | NonMembershipEvidence
     | TransparencyLogEvidence
+    | BackupCoverageEvidence
   >;
   /** Ed25519 proof over the entire credential. */
   proof: {
@@ -101,6 +102,7 @@ export interface StorageScanEvidence {
   backendsChecked: number;
   allAbsent: boolean;
   keyVerified: boolean;
+  note?: string;
 }
 
 export interface NonMembershipEvidence {
@@ -118,6 +120,13 @@ export interface TransparencyLogEvidence {
   treeRoot: string;
   inclusionProof: string[];
   witnessSignatures: Array<{ witness: string; signature: string }>;
+}
+
+export interface BackupCoverageEvidence {
+  type: "BackupCoverage";
+  method: "encryption_renders_backup_unreadable";
+  keyManagement: "threshold_2_of_3";
+  note: string;
 }
 
 // --- Serialization helpers ---
@@ -181,6 +190,7 @@ export async function createDeletionReceipt(params: {
   nonMembershipProof: NonMembershipProof;
   inclusionProof: InclusionProof;
   witnessSignatures?: Array<{ witness: string; signature: string }>;
+  storageScanNote?: string;
 }): Promise<DeletionReceipt> {
   const {
     entityType,
@@ -218,6 +228,7 @@ export async function createDeletionReceipt(params: {
     backendsChecked: scanResult.backends.length,
     allAbsent: scanResult.backends.every((b) => b.absent),
     keyVerified: scanResult.keyVerification.expectedFailure,
+    ...(params.storageScanNote ? { note: params.storageScanNote } : {}),
   };
 
   const nonMembershipEvidence: NonMembershipEvidence = {
@@ -237,7 +248,24 @@ export async function createDeletionReceipt(params: {
     witnessSignatures: witnessSignatures ?? [],
   };
 
-  // 5. Build credential WITHOUT proof field
+  // 5. Build evidence array (conditionally include BackupCoverage)
+  const evidence: DeletionReceipt["evidence"] = [
+    thresholdEvidence,
+    storageScanEvidence,
+    nonMembershipEvidence,
+    transparencyLogEvidence,
+  ];
+
+  if (attestations.length > 0) {
+    evidence.push({
+      type: "BackupCoverage",
+      method: "encryption_renders_backup_unreadable",
+      keyManagement: "threshold_2_of_3",
+      note: "Data encrypted with VD-managed threshold key; backups contain only ciphertext that is unreadable after key destruction",
+    });
+  }
+
+  // 6. Build credential WITHOUT proof field
   const credentialWithoutProof = {
     "@context": [
       "https://www.w3.org/ns/credentials/v2",
@@ -256,21 +284,16 @@ export async function createDeletionReceipt(params: {
       keyManagement: "threshold_2_of_3",
       keyRatcheting: "HKDF-SHA256",
     },
-    evidence: [
-      thresholdEvidence,
-      storageScanEvidence,
-      nonMembershipEvidence,
-      transparencyLogEvidence,
-    ],
+    evidence,
   };
 
-  // 6. Sign
+  // 7. Sign
   const message = new TextEncoder().encode(
     "vd-receipt-v1:" + canonicalJSON(credentialWithoutProof),
   );
   const signature = bytesToHex(await ed.signAsync(message, signingKey));
 
-  // 7. Attach proof and return
+  // 8. Attach proof and return
   return {
     ...credentialWithoutProof,
     proof: {
