@@ -330,6 +330,50 @@ export function runDemoDeletion(
           inclusionProof,
         });
 
+        // Store receipt in D1 so /v1/receipts/:id can serve it
+        // Use BOTH IDs: the log entry's receiptId AND the receipt's own urn:uuid ID
+        const logReceiptId = entryWithoutSig.receiptId;
+        const vcReceiptId = receipt.id.replace("urn:uuid:", "");
+        try {
+          await env.DB.prepare(
+            "INSERT INTO deletions (id, customer_id, entity_id, entity_type, entity_hash, status, receipt_id, receipt_json, created_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          )
+            .bind(
+              crypto.randomUUID(),
+              "demo",
+              entityId,
+              "demo_data",
+              commitment,
+              "completed",
+              logReceiptId,
+              JSON.stringify(receipt),
+              new Date().toISOString(),
+              new Date().toISOString(),
+            )
+            .run();
+          // Also store under the VC's own ID if different
+          if (vcReceiptId !== logReceiptId) {
+            await env.DB.prepare(
+              "INSERT INTO deletions (id, customer_id, entity_id, entity_type, entity_hash, status, receipt_id, receipt_json, created_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+              .bind(
+                crypto.randomUUID(),
+                "demo",
+                entityId,
+                "demo_data",
+                commitment,
+                "completed",
+                vcReceiptId,
+                JSON.stringify(receipt),
+                new Date().toISOString(),
+                new Date().toISOString(),
+              )
+              .run();
+          }
+        } catch {
+          // Non-fatal — receipt still returned in SSE stream
+        }
+
         step(9, "Generate Receipt", "complete", {
           receiptId: receipt.id,
           issuer: receipt.issuer,

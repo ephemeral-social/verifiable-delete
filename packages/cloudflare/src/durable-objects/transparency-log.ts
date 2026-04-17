@@ -105,4 +105,5 @@ export class TransparencyLogDO extends DurableObject<Env> {
     const log = await this.getLog();
     return log.getEntries(offset, limit);
   }
+
 }

@@ -50,4 +50,5 @@ export class KeyShareDO extends DurableObject<Env> {
   async hasShare(kekId: string): Promise<boolean> {
     return this.getStorage().hasShare(kekId);
   }
+
 }

@@ -85,4 +85,5 @@ export class SparseMerkleTreeDO extends DurableObject<Env> {
     const smt = this.ensureTree();
     return smt.root as string;
   }
+
 }
